@@ -43,7 +43,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } catch (error) {
       setState(() {
-        _errorMessage = error.toString();
+        _errorMessage = widget.authService.userMessageForError(error);
       });
     } finally {
       if (mounted) {

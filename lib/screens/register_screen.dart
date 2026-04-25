@@ -56,7 +56,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       });
     } catch (error) {
       setState(() {
-        _errorMessage = error.toString();
+        _errorMessage = widget.authService.userMessageForError(error);
       });
     } finally {
       if (mounted) {

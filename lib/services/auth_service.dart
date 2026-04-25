@@ -16,6 +16,24 @@ class AuthService {
 
   User? get currentUser => _client.auth.currentUser;
 
+  String userMessageForError(Object error) {
+    final rawMessage = error.toString();
+    final normalized = rawMessage.toLowerCase();
+
+    if (normalized.contains('failed host lookup') ||
+        normalized.contains('socketexception') ||
+        normalized.contains('clientexception') ||
+        normalized.contains('authretryablefetchexception')) {
+      return 'Bağlantı kurulamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.';
+    }
+
+    if (error is AuthException) {
+      return error.message;
+    }
+
+    return 'İşlem tamamlanamadı. Lütfen tekrar deneyin.';
+  }
+
   Future<void> signIn({
     required String email,
     required String password,
