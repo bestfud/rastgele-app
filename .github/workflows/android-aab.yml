@@ -32,7 +32,23 @@ jobs:
           echo "storeFile=upload-keystore.jks" >> android/key.properties
 
       - run: flutter pub get
-      - run: flutter build appbundle --release
+
+      - name: Validate Supabase secrets
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ]; then
+            echo "SUPABASE_URL secret missing"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SUPABASE_ANON_KEY }}" ]; then
+            echo "SUPABASE_ANON_KEY secret missing"
+            exit 1
+          fi
+
+      - name: Build release appbundle
+        run: |
+          flutter build appbundle --release \
+            --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }} \
+            --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
 
       - uses: actions/upload-artifact@v4
         with:
