@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'privacy_policy_app.dart';
 import 'screens/app_shell.dart';
 import 'screens/onboarding_screen.dart';
 import 'services/auth_service.dart';
@@ -12,6 +14,11 @@ import 'widgets/app_ui.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (_shouldShowPrivacyPolicy()) {
+    runApp(const PrivacyPolicyApp());
+    return;
+  }
 
   if (!SupabaseConfig.isConfigured) {
     runApp(const MissingConfigApp());
@@ -34,6 +41,15 @@ Future<void> main() async {
     authService: authService,
     repository: repository,
   ));
+}
+
+bool _shouldShowPrivacyPolicy() {
+  if (!kIsWeb) {
+    return false;
+  }
+
+  final path = Uri.base.path;
+  return path == '/privacy-policy' || path == '/privacy-policy/';
 }
 
 class FishingApp extends StatelessWidget {
