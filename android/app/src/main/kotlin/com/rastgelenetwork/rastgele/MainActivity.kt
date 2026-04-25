@@ -1,4 +1,4 @@
-package com.example.fishing_app
+package com.rastgelenetwork.rastgele
 
 import io.flutter.embedding.android.FlutterActivity
 
