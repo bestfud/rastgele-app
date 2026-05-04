@@ -171,6 +171,17 @@ class _LoginScreenState extends State<LoginScreen> {
                                 child: const Text('Hesap oluştur'),
                               ),
                             ),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.center,
+                              child: Text(
+                                'Build 103',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant
+                                      .withValues(alpha: 0.55),
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
