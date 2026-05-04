@@ -155,6 +155,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         unawaited(_refreshViewerProfileId(loadGeneration));
+        unawaited(_loadDeferredPosts(phaseOne.data, loadGeneration));
         _hydratePostImages(phaseOne.data, loadGeneration);
         _loadDeferredPublicSpots(
           phaseOne.data,
@@ -251,6 +252,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (_) {}
   }
 
+  Future<void> _loadDeferredPosts(
+    ProfileScreenData data,
+    int loadGeneration,
+  ) async {
+    try {
+      final posts = await widget.repository
+          .fetchPostsByUser(
+            data.profile.postUserId,
+            limit: 10,
+            includeImages: false,
+          )
+          .timeout(const Duration(seconds: 4), onTimeout: () => const []);
+      if (!mounted || loadGeneration != _loadGeneration || _profileData == null) {
+        return;
+      }
+      setState(() {
+        _profileData = _profileData!.copyWith(posts: posts);
+      });
+      await _hydratePostImages(
+        _profileData!,
+        loadGeneration,
+      );
+    } catch (_) {}
+  }
+
   Future<void> _hydratePostImages(
       ProfileScreenData data, int loadGeneration) async {
     if (data.posts.isEmpty ||
@@ -259,7 +285,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     final stopwatch = Stopwatch()..start();
-    final hydratedPosts = await widget.repository.hydratePostImages(data.posts);
+    final hydratedPosts = await widget.repository.hydratePostImages(
+      data.posts,
+      maxResolveCount: 4,
+    );
     stopwatch.stop();
     if (!mounted || loadGeneration != _loadGeneration || _profileData == null) {
       return;

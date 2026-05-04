@@ -164,7 +164,7 @@ class _HomeScreenState extends State<HomeScreen>
     final stopwatch = Stopwatch()..start();
     try {
       final enrichedItems = await widget.repository.enrichSpotFeedItems(
-        homeData.followedPublicSpots.take(12).toList(growable: false),
+        homeData.followedPublicSpots.take(5).toList(growable: false),
         includeScores: true,
         includeWeather: true,
       );

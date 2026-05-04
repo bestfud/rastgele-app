@@ -9,7 +9,9 @@ import 'auth_service.dart';
 import 'perf_logger.dart';
 
 class SpotRepository {
-  static const int _defaultFeedPageSize = 20;
+  static const int _defaultFeedPageSize = 12;
+  static const int _defaultDeferredImageResolveCount = 4;
+  static const int _defaultMapSpotLimit = 32;
   static const Duration _signedUrlTtl = Duration(days: 6);
   static const double _duplicateSpotRadiusMeters = 50;
   static const String _profileAvatarBucket = 'avatars';
@@ -252,6 +254,7 @@ class SpotRepository {
   Future<List<SpotFeedItem>> fetchGlobalVisibleSpots({
     bool includeScores = true,
     bool includeWeather = true,
+    int limit = _defaultMapSpotLimit,
   }) async {
     return _runTimed('fetchGlobalVisibleSpots', () async {
       final authUid = _authService.currentUser?.id;
@@ -264,11 +267,13 @@ class SpotRepository {
           .from('fishing_spots')
           .select(_spotBaseSelect)
           .eq('visibility', 'exact')
-          .order('created_at', ascending: false);
+          .order('created_at', ascending: false)
+          .limit(limit);
 
       final spots = (spotsResponse as List)
           .map((item) => FishingSpot.fromMap(item as Map<String, dynamic>))
           .toList(growable: false);
+      debugPrint('[PERF_ROWS] fetchGlobalVisibleSpots rows=${spots.length}');
 
       final spotIds = spots.map((spot) => spot.id).toList(growable: false);
       final results = await Future.wait<dynamic>([
@@ -573,7 +578,7 @@ class SpotRepository {
   }
 
   Future<List<SpotFeedItem>> fetchDiscoverableSpots({
-    int limit = 18,
+    int limit = 10,
   }) async {
     return _runTimed('fetchDiscoverableSpots', () async {
       final profile = await _profile();
@@ -584,12 +589,13 @@ class SpotRepository {
           .neq('owner_profile_id', profile.id)
           .eq('status', 'active')
           .order('created_at', ascending: false)
-          .limit(limit * 3);
+          .limit(limit);
 
       final spots = (rows as List)
           .map((item) => FishingSpot.fromMap(item as Map<String, dynamic>))
           .where((spot) => spot.id.isNotEmpty)
           .toList(growable: false);
+      debugPrint('[PERF_ROWS] fetchDiscoverableSpots rows=${spots.length}');
 
       if (spots.isEmpty) {
         return const [];
@@ -624,33 +630,15 @@ class SpotRepository {
       final spotIds =
           visibleSpots.map((spot) => spot.id).toList(growable: false);
       final favoriteSpotIds = await _fetchFavoriteSpotIds(spotIds);
-      final results = await Future.wait<dynamic>([
-        _fetchLatestScores(spotIds),
-        _fetchLatestWeatherSnapshotPairs(spotIds),
-      ]);
-      final scoresBySpot = results[0] as Map<String, FishingScore>;
-      final weatherBySpot = results[1] as Map<String, _WeatherSnapshotPair>;
       final items = _buildSpotFeedItems(
         visibleSpots,
-        storedScoresBySpot: scoresBySpot,
-        weatherBySpot: weatherBySpot,
-        exposeWeatherSnapshots: true,
+        storedScoresBySpot: const <String, FishingScore>{},
+        weatherBySpot: const <String, _WeatherSnapshotPair>{},
+        exposeWeatherSnapshots: false,
         favoriteSpotIds: favoriteSpotIds,
         existingItemsBySpot: existingItemsBySpot,
       );
-      final sortedItems = [...items]..sort((a, b) {
-          final scoreCompare =
-              (b.score?.scoreValue ?? -1).compareTo(a.score?.scoreValue ?? -1);
-          if (scoreCompare != 0) {
-            return scoreCompare;
-          }
-          return (b.spot.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0))
-              .compareTo(
-            a.spot.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0),
-          );
-        });
-
-      return sortedItems.take(limit).toList(growable: false);
+      return items.take(limit).toList(growable: false);
     });
   }
 
@@ -686,7 +674,7 @@ class SpotRepository {
   }) async {
     return _runTimed('fetchDiscoverableProfiles', () async {
       final currentProfile = await _profile();
-      final spots = await fetchDiscoverableSpots(limit: limit * 2);
+      final spots = await fetchDiscoverableSpots(limit: limit);
       if (spots.isEmpty) {
         return const [];
       }
@@ -763,11 +751,6 @@ class SpotRepository {
         isSelfProfileLookup ? currentProfile!.id : normalizedProfileId,
       );
       final profile = currentProfile ?? summary.profile;
-      final postsFuture = fetchPostsByUser(
-        profile.postUserId,
-        includeImages: includePostImages,
-      );
-      final posts = await postsFuture;
 
       return ProfileScreenPhaseOneData(
         data: ProfileScreenData(
@@ -778,7 +761,7 @@ class SpotRepository {
             followerCount: summary.followerCount,
             followingCount: summary.followingCount,
           ),
-          posts: posts,
+          posts: const [],
           publicSpots: const [],
           savedSpots: const [],
           sharedWithMeSpots: const [],
@@ -919,7 +902,7 @@ class SpotRepository {
 
   Future<List<SocialPost>> fetchPostsByUser(
     String userId, {
-    int limit = _defaultFeedPageSize,
+    int limit = 10,
     int offset = 0,
     bool includeImages = true,
   }) async {
@@ -936,7 +919,7 @@ class SpotRepository {
 
   Future<List<SocialPost>> fetchPostsForSpot(
     String spotId, {
-    int limit = 40,
+    int limit = 12,
     bool includeImages = true,
   }) async {
     return _runTimed('fetchPostsForSpot', () async {
@@ -960,6 +943,7 @@ class SpotRepository {
           .map((item) => SocialPost.fromMap(item as Map<String, dynamic>))
           .where((post) => post.id.isNotEmpty)
           .toList(growable: false);
+      debugPrint('[PERF_ROWS] fetchPostsForSpot rows=${basePosts.length}');
       if (basePosts.isEmpty) {
         return basePosts;
       }
@@ -996,7 +980,10 @@ class SpotRepository {
         return enrichedPosts;
       }
 
-      return hydratePostImages(enrichedPosts);
+      return hydratePostImages(
+        enrichedPosts,
+        maxResolveCount: _defaultDeferredImageResolveCount,
+      );
     });
   }
 
@@ -1089,6 +1076,7 @@ class SpotRepository {
       final rowList = (response as List)
           .map((item) => Map<String, dynamic>.from(item as Map))
           .toList(growable: false);
+      debugPrint('[PERF_ROWS] $scope rows=${rowList.length}');
       perfLog(
         '_fetchFeedPostsFromServer[$scope] rpc returned rows=${rowList.length} in ${rpcStopwatch.elapsedMilliseconds}ms',
       );
@@ -1102,7 +1090,10 @@ class SpotRepository {
       }
 
       final hydrationStopwatch = Stopwatch()..start();
-      final hydratedPosts = await hydratePostImages(posts);
+      final hydratedPosts = await hydratePostImages(
+        posts,
+        maxResolveCount: _defaultDeferredImageResolveCount,
+      );
       hydrationStopwatch.stop();
       perfLog(
         '_fetchFeedPostsFromServer[$scope] image hydration posts=${hydratedPosts.length} took ${hydrationStopwatch.elapsedMilliseconds}ms',
@@ -2480,8 +2471,12 @@ class SpotRepository {
     });
   }
 
-  Future<List<SocialPost>> hydratePostImages(List<SocialPost> posts) async {
+  Future<List<SocialPost>> hydratePostImages(
+    List<SocialPost> posts, {
+    int maxResolveCount = _defaultDeferredImageResolveCount,
+  }) async {
     final storagePaths = posts
+        .where((post) => (post.imageUrl ?? '').trim().isEmpty)
         .map((post) => post.imageStoragePath)
         .whereType<String>()
         .where((path) => path.isNotEmpty)
@@ -2491,7 +2486,10 @@ class SpotRepository {
       return posts;
     }
 
-    final signedUrls = await _resolveSignedUrls(storagePaths);
+    final signedUrls = await _resolveSignedUrls(
+      storagePaths,
+      maxResolveCount: maxResolveCount,
+    );
     return posts
         .map(
           (post) => post.copyWith(
@@ -3367,14 +3365,38 @@ class SpotRepository {
   }
 
   Future<Map<String, String>> _resolveSignedUrls(
-      List<String> storagePaths) async {
+    List<String> storagePaths, {
+    int maxResolveCount = _defaultDeferredImageResolveCount,
+  }) async {
     if (storagePaths.isEmpty) {
       return const {};
     }
 
     return _runTimed('_resolveSignedUrls', () async {
+      final uniquePaths = storagePaths.toSet().toList(growable: false);
+      final requestedPaths = uniquePaths.take(maxResolveCount).toList(
+            growable: false,
+          );
+      var cacheHitCount = 0;
+      var dedupedCount = 0;
+      var remoteCount = 0;
+      for (final path in requestedPaths) {
+        final cached = _signedUrlCache[path];
+        if (cached != null && !cached.isExpired) {
+          cacheHitCount += 1;
+          continue;
+        }
+        if (_pendingSignedUrlRequests.containsKey(path)) {
+          dedupedCount += 1;
+          continue;
+        }
+        remoteCount += 1;
+      }
+      debugPrint(
+        '[PERF_ROWS] signedUrls requested=${uniquePaths.length} remote=$remoteCount cacheHit=$cacheHitCount deduped=$dedupedCount',
+      );
       final entries = await Future.wait(
-        storagePaths
+        requestedPaths
             .map((path) async => MapEntry(path, await _signedUrlForPath(path))),
       );
 

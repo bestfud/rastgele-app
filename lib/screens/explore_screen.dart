@@ -243,7 +243,10 @@ class _ExploreScreenState extends State<ExploreScreen>
         return;
       }
       final hydrationStopwatch = Stopwatch()..start();
-      final hydrated = await widget.repository.hydratePostImages(sourcePosts);
+      final hydrated = await widget.repository.hydratePostImages(
+        sourcePosts,
+        maxResolveCount: 4,
+      );
       hydrationStopwatch.stop();
       if (!mounted || generation != _loadGenerations[filter]) {
         return;

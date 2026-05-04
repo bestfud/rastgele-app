@@ -334,7 +334,8 @@ class _MapScreenState extends State<MapScreen>
       case _MapLayerFilter.all:
         return widget.repository.fetchGlobalVisibleSpots(
           includeScores: false,
-          includeWeather: true,
+          includeWeather: false,
+          limit: 32,
         );
     }
   }
@@ -347,6 +348,7 @@ class _MapScreenState extends State<MapScreen>
       case _MapLayerFilter.posts:
       case _MapLayerFilter.all:
         final posts = await widget.repository.fetchRecentPosts(
+          limit: 8,
           includeImages: false,
         );
         return posts
@@ -425,7 +427,7 @@ class _MapScreenState extends State<MapScreen>
     final stopwatch = Stopwatch()..start();
     try {
       final enrichedItems = await widget.repository.enrichSpotFeedItems(
-        items,
+        items.take(5).toList(growable: false),
         includeScores: true,
         includeWeather: true,
       );
