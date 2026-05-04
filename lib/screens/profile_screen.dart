@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -74,6 +76,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isOpeningChat = false;
   int _profileImageVersion = 0;
   bool _isSigningOut = false;
+  bool _isDeferredSectionLoading = false;
 
   @override
   void initState() {
@@ -125,15 +128,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     try {
-      final results = await Future.wait<dynamic>([
-        widget.repository.fetchProfileScreenPhaseOneData(
-          profileId: widget.profileId,
-          includePostImages: false,
-        ),
-        widget.repository.fetchCurrentProfile(),
-      ]);
-      final phaseOne = results[0] as ProfileScreenPhaseOneData;
-      final viewerProfile = results[1] as AppProfile;
+      final phaseOne = await widget.repository.fetchProfileScreenPhaseOneData(
+        profileId: widget.profileId,
+        includePostImages: false,
+      );
       stopwatch.stop();
       if (!mounted || loadGeneration != _loadGeneration) {
         return;
@@ -143,8 +141,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileData = phaseOne.data;
         _profileLoadError = null;
         _isInitialLoading = false;
-        _viewerProfileId = viewerProfile.id;
       });
+      _isDeferredSectionLoading = true;
 
       perfLog(
         'Profile phase 1 data load complete in ${_openStopwatch.elapsedMilliseconds}ms posts=${phaseOne.data.posts.length}',
@@ -156,6 +154,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_refreshViewerProfileId(loadGeneration));
         _hydratePostImages(phaseOne.data, loadGeneration);
         _loadDeferredPublicSpots(
           phaseOne.data,
@@ -197,6 +196,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         data.profile,
         isOwnProfile: data.isOwnProfile,
         knownPostIds: knownPostIds,
+      ).timeout(
+        const Duration(seconds: 4),
+        onTimeout: () => const <SpotFeedItem>[],
       );
       stopwatch.stop();
       if (!mounted ||
@@ -212,6 +214,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             totalFishingSpots: publicSpots.length,
           ),
         );
+        _isDeferredSectionLoading = false;
       });
       perfLog(
         'Profile deferred spots load complete in ${stopwatch.elapsedMilliseconds}ms publicSpots=${publicSpots.length}',
@@ -226,9 +229,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       setState(() {});
+      setState(() {
+        _isDeferredSectionLoading = false;
+      });
       perfLog(
           'Profile deferred spots load failed in ${stopwatch.elapsedMilliseconds}ms: $error');
     }
+  }
+
+  Future<void> _refreshViewerProfileId(int loadGeneration) async {
+    try {
+      final viewerProfile = await widget.repository
+          .fetchCurrentProfile()
+          .timeout(const Duration(seconds: 3));
+      if (!mounted || loadGeneration != _loadGeneration) {
+        return;
+      }
+      setState(() {
+        _viewerProfileId = viewerProfile.id;
+      });
+    } catch (_) {}
   }
 
   Future<void> _hydratePostImages(
@@ -660,10 +680,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     if (_profileLoadError != null && _profileData == null) {
-      return Center(
+      return const Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text('Profil yüklenemedi: $_profileLoadError'),
+          padding: EdgeInsets.all(24),
+          child: Text('Profil yüklenemedi.'),
         ),
       );
     }
@@ -936,6 +956,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                 ),
+              ],
+              if (_isDeferredSectionLoading) ...[
+                const SizedBox(height: 12),
+                const LinearProgressIndicator(minHeight: 2),
               ],
               const SizedBox(height: 16),
               Container(
@@ -1529,7 +1553,7 @@ class _ProfileConnectionsScreenState extends State<_ProfileConnectionsScreen> {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: Text('${widget.title} yüklenemedi: ${snapshot.error}'),
+                child: Text('${widget.title} yüklenemedi.'),
               ),
             );
           }

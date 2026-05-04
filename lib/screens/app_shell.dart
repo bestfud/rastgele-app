@@ -66,7 +66,7 @@ class _AppShellState extends State<AppShell> {
         _startBadgePolling();
         unawaited(_primeProfileForCurrentSession());
         unawaited(_refreshShellProfile());
-        unawaited(_refreshShellBadgeCounts());
+        unawaited(_scheduleDeferredShellBadgeRefresh());
       }
     });
 
@@ -102,7 +102,7 @@ class _AppShellState extends State<AppShell> {
         _startBadgePolling();
         unawaited(_primeProfileForCurrentSession());
         unawaited(_refreshShellProfile());
-        unawaited(_refreshShellBadgeCounts());
+        unawaited(_scheduleDeferredShellBadgeRefresh());
       } else {
         _stopBadgePolling();
         if (mounted) {
@@ -127,13 +127,21 @@ class _AppShellState extends State<AppShell> {
     _badgePollTimer?.cancel();
     _badgePollTimer = Timer.periodic(
       const Duration(seconds: 15),
-      (_) => unawaited(_refreshShellBadgeCounts()),
+      (_) => unawaited(_scheduleDeferredShellBadgeRefresh()),
     );
   }
 
   void _stopBadgePolling() {
     _badgePollTimer?.cancel();
     _badgePollTimer = null;
+  }
+
+  Future<void> _scheduleDeferredShellBadgeRefresh() async {
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (!mounted) {
+      return;
+    }
+    await _refreshShellBadgeCounts();
   }
 
   Future<void> _openAddSpot() async {

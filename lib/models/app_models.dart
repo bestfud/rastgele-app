@@ -577,6 +577,18 @@ class SpotDetailData {
   final FishingSpot spot;
   final FishingScore? score;
   final WeatherSnapshot? weatherSnapshot;
+
+  SpotDetailData copyWith({
+    FishingSpot? spot,
+    FishingScore? score,
+    WeatherSnapshot? weatherSnapshot,
+  }) {
+    return SpotDetailData(
+      spot: spot ?? this.spot,
+      score: score ?? this.score,
+      weatherSnapshot: weatherSnapshot ?? this.weatherSnapshot,
+    );
+  }
 }
 
 class AppNotification {

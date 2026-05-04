@@ -70,6 +70,7 @@ class _HomeScreenState extends State<HomeScreen>
   int _loadGeneration = 0;
   List<SpotFeedItem> _savedItems = const [];
   List<SpotFeedItem> _sharedItems = const [];
+  bool _isSupplementalLoading = false;
 
   @override
   void initState() {
@@ -118,14 +119,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     try {
-      final results = await Future.wait<dynamic>([
-        widget.repository.fetchHomeScreenPhaseOneData(),
-        widget.repository.fetchFavoriteSpots(),
-        widget.repository.fetchSharedWithMeSpots(),
-      ]);
-      final homeData = results[0] as HomeScreenData;
-      final savedItems = results[1] as List<SpotFeedItem>;
-      final sharedItems = results[2] as List<SpotFeedItem>;
+      final homeData = await widget.repository.fetchHomeScreenPhaseOneData();
       final currentAuthUid = widget.authService.currentUser?.id;
       final isStaleGeneration = generation != _loadGeneration;
       final isStaleAuth = homeData.authUid != currentAuthUid;
@@ -135,20 +129,18 @@ class _HomeScreenState extends State<HomeScreen>
 
       setState(() {
         _homeData = homeData;
-        _savedItems = savedItems;
-        _sharedItems = sharedItems;
+        if (!preserveData) {
+          _savedItems = const [];
+          _sharedItems = const [];
+        }
         _isFeedLoading = false;
         _isDeferredLoading = homeData.followedPublicSpots.isNotEmpty;
+        _isSupplementalLoading = true;
       });
-      if (homeData.followedPublicSpots.isEmpty) {
-        if (!_didLogTotalDataLoaded) {
-          _didLogTotalDataLoaded = true;
-        }
-        return;
-      }
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _loadDeferredHomeEnrichment(homeData, generation);
+        unawaited(_loadDeferredHomeEnrichment(homeData, generation));
+        unawaited(_loadSupplementalHomeFeeds(generation));
       });
     } catch (error) {
       if (!mounted || generation != _loadGeneration) {
@@ -172,7 +164,7 @@ class _HomeScreenState extends State<HomeScreen>
     final stopwatch = Stopwatch()..start();
     try {
       final enrichedItems = await widget.repository.enrichSpotFeedItems(
-        homeData.followedPublicSpots,
+        homeData.followedPublicSpots.take(12).toList(growable: false),
         includeScores: true,
         includeWeather: true,
       );
@@ -188,8 +180,15 @@ class _HomeScreenState extends State<HomeScreen>
       }
 
       setState(() {
+        final currentItems = _homeData?.followedPublicSpots ?? const [];
+        final enrichedById = {
+          for (final item in enrichedItems) item.spot.id: item,
+        };
+        final mergedItems = currentItems
+            .map((item) => enrichedById[item.spot.id] ?? item)
+            .toList(growable: false);
         _homeData = _homeData?.copyWith(
-          followedPublicSpots: enrichedItems,
+          followedPublicSpots: mergedItems,
           repositoryMethod: 'fetchFollowedPublicHomeSpots',
         );
         _isDeferredLoading = false;
@@ -205,6 +204,34 @@ class _HomeScreenState extends State<HomeScreen>
 
       setState(() {
         _isDeferredLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadSupplementalHomeFeeds(int generation) async {
+    try {
+      final results = await Future.wait<dynamic>([
+        widget.repository
+            .fetchFavoriteSpots()
+            .timeout(const Duration(seconds: 4), onTimeout: () => const []),
+        widget.repository
+            .fetchSharedWithMeSpots()
+            .timeout(const Duration(seconds: 4), onTimeout: () => const []),
+      ]);
+      if (!mounted || generation != _loadGeneration) {
+        return;
+      }
+      setState(() {
+        _savedItems = results[0] as List<SpotFeedItem>;
+        _sharedItems = results[1] as List<SpotFeedItem>;
+        _isSupplementalLoading = false;
+      });
+    } catch (_) {
+      if (!mounted || generation != _loadGeneration) {
+        return;
+      }
+      setState(() {
+        _isSupplementalLoading = false;
       });
     }
   }
@@ -405,7 +432,7 @@ class _HomeScreenState extends State<HomeScreen>
         builder: (context) {
           final isCompactMobile = MediaQuery.of(context).size.width < 720;
           if (_loadError != null && _homeData == null) {
-            return Center(child: Text('Meralar yüklenemedi: $_loadError'));
+            return const Center(child: Text('Meralar yüklenemedi.'));
           }
           final homeData = _homeData;
           return Center(
@@ -413,6 +440,8 @@ class _HomeScreenState extends State<HomeScreen>
               constraints: const BoxConstraints(maxWidth: 960),
               child: Column(
                 children: [
+                  if (_isSupplementalLoading || _isDeferredLoading)
+                    const LinearProgressIndicator(minHeight: 2),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                     child: _HomeFeedToggle(

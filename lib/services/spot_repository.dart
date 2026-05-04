@@ -872,6 +872,25 @@ class SpotRepository {
     });
   }
 
+  Future<SpotDetailData> fetchSpotDetailPhaseOne(String spotId) async {
+    return _runTimed('fetchSpotDetailPhaseOne', () async {
+      final normalizedSpotId = spotId.trim();
+      final spotRow = await _client
+          .from('fishing_spots')
+          .select(_spotBaseSelect)
+          .eq('id', normalizedSpotId)
+          .single();
+      return SpotDetailData(
+        spot: FishingSpot.fromMap(spotRow),
+      );
+    }).catchError((error) {
+      debugPrint(
+        '[SPOT_REPO] phaseOne result spotId=$spotId found=false error=$error',
+      );
+      throw error;
+    });
+  }
+
   Future<_ProfileSummaryData> _fetchProfileSummary(String? profileId) async {
     return _runTimed('getProfileSummaryRpc', () async {
       final rows = await _client.rpc(
@@ -1911,6 +1930,34 @@ class SpotRepository {
     }).catchError((error) {
       debugPrint('[SPOT_REPO] result spotId=$spotId found=false error=$error');
       throw error;
+    });
+  }
+
+  Future<SpotDetailData> enrichSpotDetailData(SpotDetailData detail) async {
+    return _runTimed('enrichSpotDetailData', () async {
+      final spotId = detail.spot.id.trim();
+      if (spotId.isEmpty) {
+        return detail;
+      }
+
+      final results = await Future.wait<dynamic>([
+        _fetchLatestScores(<String>[spotId]),
+        _fetchLatestWeatherSnapshotPairs(<String>[spotId]),
+      ]);
+      final scoresBySpot = results[0] as Map<String, FishingScore>;
+      final weatherBySpot = results[1] as Map<String, _WeatherSnapshotPair>;
+      final weatherPair = weatherBySpot[_normalizeWeatherSpotId(spotId)];
+      final currentWeather = weatherPair?.current;
+
+      return detail.copyWith(
+        score: _resolveSpotScore(
+          spotId: spotId,
+          storedScore: scoresBySpot[spotId],
+          currentWeather: currentWeather,
+          previousWeather: weatherPair?.previous,
+        ),
+        weatherSnapshot: currentWeather,
+      );
     });
   }
 

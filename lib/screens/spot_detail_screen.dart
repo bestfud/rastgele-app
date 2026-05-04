@@ -44,6 +44,7 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
   bool _isLoading = true;
   bool _isEmbeddedMapInteracting = false;
   int _loadGeneration = 0;
+  bool _isDeferredDataLoading = false;
 
   @override
   void initState() {
@@ -114,57 +115,24 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
     }
 
     try {
-      final results = await Future.wait<dynamic>([
-        widget.repository.fetchSpotDetail(widget.spotId),
-        widget.repository.fetchCurrentProfile(),
-        widget.repository.isSpotFavorited(widget.spotId),
-      ]);
+      final detail =
+          await widget.repository.fetchSpotDetailPhaseOne(widget.spotId);
 
       if (!mounted || loadGeneration != _loadGeneration) {
         return;
       }
 
       setState(() {
-        _detail = results[0] as SpotDetailData;
-        _currentProfile = results[1] as AppProfile;
+        _detail = detail;
         _spotPosts = const [];
         _isLoading = false;
         _loadError = null;
+        _isDeferredDataLoading = true;
       });
 
-      try {
-        final spotPosts =
-            await widget.repository.fetchPostsForSpot(widget.spotId);
-        if (!mounted || loadGeneration != _loadGeneration) {
-          return;
-        }
-        setState(() {
-          _spotPosts = spotPosts;
-        });
-      } catch (error) {
-        debugPrint(
-          '[SPOT_DETAIL] postsLoadFailure spotId=${widget.spotId} error=$error',
-        );
-        if (!mounted || loadGeneration != _loadGeneration) {
-          return;
-        }
-        setState(() {
-          _spotPosts = const [];
-        });
-      }
-
-      final detail = results[0] as SpotDetailData;
-      final currentProfile = results[1] as AppProfile;
-      if (_isOwner(detail: detail, currentProfile: currentProfile)) {
-        final sharedProfiles =
-            await widget.repository.fetchSpotSharedProfiles(widget.spotId);
-        if (!mounted || loadGeneration != _loadGeneration) {
-          return;
-        }
-        setState(() {
-          _sharedProfiles = sharedProfiles;
-        });
-      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_loadDeferredDetailData(detail, loadGeneration));
+      });
     } catch (error) {
       debugPrint(
         '[SPOT_DETAIL] loadFailure spotId=${widget.spotId} error=$error',
@@ -180,7 +148,76 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
         _spotPosts = const [];
         _isLoading = false;
         _loadError = error;
+        _isDeferredDataLoading = false;
       });
+    }
+  }
+
+  Future<void> _loadDeferredDetailData(
+    SpotDetailData detail,
+    int loadGeneration,
+  ) async {
+    try {
+      final results = await Future.wait<dynamic>([
+        widget.repository
+            .enrichSpotDetailData(detail)
+            .timeout(const Duration(seconds: 4), onTimeout: () => detail),
+        _loadCurrentProfileOrNull(),
+        widget.repository
+            .fetchPostsForSpot(widget.spotId)
+            .timeout(const Duration(seconds: 4), onTimeout: () => const []),
+      ]);
+      if (!mounted || loadGeneration != _loadGeneration) {
+        return;
+      }
+
+      final enrichedDetail = results[0] as SpotDetailData;
+      final currentProfile = results[1] as AppProfile?;
+      final spotPosts = results[2] as List<SocialPost>;
+      setState(() {
+        _detail = enrichedDetail;
+        _currentProfile = currentProfile;
+        _spotPosts = spotPosts;
+        _isDeferredDataLoading = false;
+      });
+
+      if (currentProfile != null &&
+          _isOwner(detail: enrichedDetail, currentProfile: currentProfile)) {
+        try {
+          final sharedProfiles = await widget.repository
+              .fetchSpotSharedProfiles(widget.spotId)
+              .timeout(
+                const Duration(seconds: 4),
+                onTimeout: () => const <AppProfile>[],
+              );
+          if (!mounted || loadGeneration != _loadGeneration) {
+            return;
+          }
+          setState(() {
+            _sharedProfiles = sharedProfiles;
+          });
+        } catch (_) {}
+      }
+    } catch (error) {
+      debugPrint(
+        '[SPOT_DETAIL] deferredLoadFailure spotId=${widget.spotId} error=$error',
+      );
+      if (!mounted || loadGeneration != _loadGeneration) {
+        return;
+      }
+      setState(() {
+        _isDeferredDataLoading = false;
+      });
+    }
+  }
+
+  Future<AppProfile?> _loadCurrentProfileOrNull() async {
+    try {
+      return await widget.repository
+          .fetchCurrentProfile()
+          .timeout(const Duration(seconds: 3));
+    } catch (_) {
+      return null;
     }
   }
 
@@ -265,7 +302,7 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
           onOpenCreatePost: () {},
           onOpenSearch: () {},
           onOpenLocation: () {},
-          onLogout: () {},
+          onLogout: () async {},
           profileId: sharer.profileId,
           showShellChrome: false,
         ),
@@ -365,12 +402,12 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
             );
           }
 
-          if (_isLoading || _detail == null || _currentProfile == null) {
+          if (_isLoading || _detail == null) {
             return const Center(child: CircularProgressIndicator());
           }
 
           final detail = _detail!;
-          final currentProfile = _currentProfile!;
+          final currentProfile = _currentProfile;
 
           final weather = detail.weatherSnapshot;
           if (!_didLogDataLoaded) {
@@ -392,15 +429,19 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
             bestTimeWindow: bestTimeWindow,
             score: score,
           );
-          final currentProfileId = currentProfile.id;
-          final isOwner = _isOwner(
-            detail: detail,
-            currentProfile: currentProfile,
-          );
-          final isSharedViaWhitelist = _isSharedViaWhitelist(
-            detail: detail,
-            currentProfile: currentProfile,
-          );
+          final currentProfileId = currentProfile?.id ?? '';
+          final isOwner = currentProfile != null
+              ? _isOwner(
+                  detail: detail,
+                  currentProfile: currentProfile,
+                )
+              : false;
+          final isSharedViaWhitelist = currentProfile != null
+              ? _isSharedViaWhitelist(
+                  detail: detail,
+                  currentProfile: currentProfile,
+                )
+              : detail.spot.visibility.trim().toLowerCase() == 'private';
           final sharerIdentity = _incomingSharerIdentity;
           return RefreshIndicator(
             onRefresh: _refresh,
@@ -413,6 +454,11 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
                       : const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                   children: [
+                    if (_isDeferredDataLoading)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 12),
+                        child: LinearProgressIndicator(minHeight: 2),
+                      ),
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(16),
