@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -85,6 +86,7 @@ class _MapScreenState extends State<MapScreen>
   bool _didCenterOnCurrentLocation = false;
   bool _isMapReady = false;
   bool _pendingAnimateToUser = false;
+  bool _showMapSurface = false;
   late LatLng _cameraCenter;
   double _cameraZoom = _defaultMapZoom;
   LatLngBounds? _visibleBounds;
@@ -102,8 +104,22 @@ class _MapScreenState extends State<MapScreen>
     _openStopwatch.start();
     perfLog('Map open start');
     perfLogFrame('Map', _openStopwatch);
-    _loadCurrentLocation();
-    _reload();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _showMapSurface = true;
+      });
+      unawaited(_loadCurrentLocation());
+      unawaited(_reload(forceRefresh: true, includePosts: false));
+      Future<void>.delayed(const Duration(milliseconds: 500), () {
+        if (!mounted || _postItems != null || _filter == _MapLayerFilter.spots) {
+          return;
+        }
+        unawaited(_reload(forceRefresh: false, includeSpots: false));
+      });
+    });
   }
 
   @override
@@ -120,12 +136,18 @@ class _MapScreenState extends State<MapScreen>
     }
   }
 
-  Future<void> _reload({bool forceRefresh = true}) async {
+  Future<void> _reload({
+    bool forceRefresh = true,
+    bool includeSpots = true,
+    bool includePosts = true,
+  }) async {
     final stopwatch = Stopwatch()..start();
     final generation = ++_reloadGeneration;
-    final shouldLoadSpots = _filter != _MapLayerFilter.posts &&
+    final shouldLoadSpots = includeSpots &&
+        _filter != _MapLayerFilter.posts &&
         (forceRefresh || _spotItems == null);
-    final shouldLoadPosts = _filter != _MapLayerFilter.spots &&
+    final shouldLoadPosts = includePosts &&
+        _filter != _MapLayerFilter.spots &&
         (forceRefresh || _postItems == null);
 
     setState(() {
@@ -1019,7 +1041,9 @@ class _MapScreenState extends State<MapScreen>
       headerAvatarUrl: widget.shellAvatarUrl,
       headerAvatarLabel: widget.shellAvatarLabel,
       onLogout: widget.onLogout,
-      body: Stack(
+      body: !_showMapSurface
+          ? const _MapLoadingSkeleton()
+          : Stack(
         children: [
           FlutterMap(
             mapController: _mapController,
@@ -1078,16 +1102,16 @@ class _MapScreenState extends State<MapScreen>
           if (loadError != null &&
               !hasVisibleMarkers &&
               !isCurrentFilterLoading)
-            Center(
+            const Center(
               child: SizedBox(
                 width: 320,
                 child: AppEmptyState(
-                  iconWidget: const AppIcon(
+                  iconWidget: AppIcon(
                     AppGlyph.compass,
                     size: 24,
                     color: AppColors.textSecondary,
                   ),
-                  message: 'Harita verisi yüklenemedi: $loadError',
+                  message: 'Harita verisi yüklenemedi.',
                 ),
               ),
             ),
@@ -1212,6 +1236,30 @@ class _MapScreenState extends State<MapScreen>
                   ),
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MapLoadingSkeleton extends StatelessWidget {
+  const _MapLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.all(16),
+      child: Column(
+        children: [
+          AppSkeletonCard(
+            child: SizedBox(height: 44),
+          ),
+          SizedBox(height: 12),
+          Expanded(
+            child: AppSkeletonCard(
+              child: SizedBox.expand(),
             ),
           ),
         ],
