@@ -36,11 +36,11 @@ jobs:
       - name: Validate Supabase secrets
         run: |
           if [ -z "${{ secrets.SUPABASE_URL }}" ]; then
-            echo "SUPABASE_URL secret missing"
+            echo "SUPABASE_URL missing"
             exit 1
           fi
           if [ -z "${{ secrets.SUPABASE_ANON_KEY }}" ]; then
-            echo "SUPABASE_ANON_KEY secret missing"
+            echo "SUPABASE_ANON_KEY missing"
             exit 1
           fi
 
