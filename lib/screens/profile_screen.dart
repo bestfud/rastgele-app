@@ -31,7 +31,7 @@ class ProfileScreen extends StatefulWidget {
     this.onDirectMessageStateChanged = _noopProfileCallback,
     this.unreadMessageCount = 0,
     this.unreadNotificationCount = 0,
-    required this.onLogout,
+    this.onLogout,
     this.profileId,
     this.showShellChrome = true,
     this.shellAvatarUrl,
@@ -51,7 +51,7 @@ class ProfileScreen extends StatefulWidget {
   final VoidCallback onDirectMessageStateChanged;
   final int unreadMessageCount;
   final int unreadNotificationCount;
-  final VoidCallback onLogout;
+  final Future<void> Function()? onLogout;
   final String? profileId;
   final bool showShellChrome;
   final String? shellAvatarUrl;
@@ -73,6 +73,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _didLogHydration = false;
   bool _isOpeningChat = false;
   int _profileImageVersion = 0;
+  bool _isSigningOut = false;
 
   @override
   void initState() {
@@ -287,6 +288,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileImageVersion++;
       });
       await _reload();
+    }
+  }
+
+  Future<void> _confirmLogout() async {
+    final onLogout = widget.onLogout;
+    if (onLogout == null || _isSigningOut) {
+      return;
+    }
+
+    final shouldLogout = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Çıkış yapılsın mı?'),
+            content: const Text('Hesabından çıkış yapacaksın.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Vazgeç'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Çıkış Yap'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!shouldLogout || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _isSigningOut = true;
+    });
+
+    try {
+      await onLogout();
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Çıkış yapılamadı. Lütfen tekrar deneyin.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSigningOut = false;
+        });
+      }
     }
   }
 
@@ -861,6 +915,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onToggleFollow: () => _toggleFollow(data),
                 onMessage: () => _openDirectMessage(data),
               ),
+              if (data.isOwnProfile && widget.onLogout != null) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _isSigningOut ? null : _confirmLogout,
+                    icon: _isSigningOut
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: theme.colorScheme.primary,
+                            ),
+                          )
+                        : const Icon(Icons.logout_rounded),
+                    label: Text(
+                      _isSigningOut ? 'Çıkış yapılıyor...' : 'Çıkış Yap',
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               Container(
                 decoration: BoxDecoration(
@@ -969,7 +1045,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       unreadNotificationCount: widget.unreadNotificationCount,
       headerAvatarUrl: widget.shellAvatarUrl,
       headerAvatarLabel: widget.shellAvatarLabel,
-      onLogout: widget.onLogout,
+      onLogout: () {},
       actions: actions,
       body: body,
     );

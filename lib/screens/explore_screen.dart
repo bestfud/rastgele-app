@@ -48,7 +48,7 @@ class ExploreScreen extends StatefulWidget {
   final VoidCallback onOpenNotifications;
   final int unreadMessageCount;
   final int unreadNotificationCount;
-  final VoidCallback onLogout;
+  final Future<void> Function() onLogout;
   final String? shellAvatarUrl;
   final String? shellAvatarLabel;
 
@@ -573,7 +573,7 @@ class _ExploreScreenState extends State<ExploreScreen>
       unreadNotificationCount: widget.unreadNotificationCount,
       headerAvatarUrl: widget.shellAvatarUrl,
       headerAvatarLabel: widget.shellAvatarLabel,
-      onLogout: widget.onLogout,
+      onLogout: () => unawaited(widget.onLogout()),
       body: Column(
         children: [
           Padding(

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -28,6 +29,7 @@ class HomeScreen extends StatefulWidget {
     required this.onOpenLocation,
     required this.onOpenMessages,
     required this.onOpenNotifications,
+    required this.onLogout,
     required this.unreadMessageCount,
     required this.unreadNotificationCount,
     this.shellAvatarUrl,
@@ -46,6 +48,7 @@ class HomeScreen extends StatefulWidget {
   final VoidCallback onOpenLocation;
   final VoidCallback onOpenMessages;
   final VoidCallback onOpenNotifications;
+  final Future<void> Function() onLogout;
   final int unreadMessageCount;
   final int unreadNotificationCount;
   final String? shellAvatarUrl;
@@ -255,7 +258,7 @@ class _HomeScreenState extends State<HomeScreen>
           onOpenNotifications: widget.onOpenNotifications,
           unreadMessageCount: widget.unreadMessageCount,
           unreadNotificationCount: widget.unreadNotificationCount,
-          onLogout: () => widget.authService.signOut(),
+          onLogout: widget.onLogout,
           profileId: sharerIdentity.profileId,
           showShellChrome: false,
         ),
@@ -397,7 +400,7 @@ class _HomeScreenState extends State<HomeScreen>
       unreadNotificationCount: widget.unreadNotificationCount,
       headerAvatarUrl: widget.shellAvatarUrl,
       headerAvatarLabel: widget.shellAvatarLabel,
-      onLogout: () => widget.authService.signOut(),
+      onLogout: () => unawaited(widget.onLogout()),
       body: Builder(
         builder: (context) {
           final isCompactMobile = MediaQuery.of(context).size.width < 720;

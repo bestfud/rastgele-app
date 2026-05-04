@@ -12,6 +12,7 @@ import 'profile_screen.dart';
 import 'spot_detail_screen.dart';
 
 void _noopSearchCallback() {}
+Future<void> _noopSearchLogout() async {}
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({
@@ -25,7 +26,7 @@ class SearchScreen extends StatefulWidget {
     this.onOpenSearch = _noopSearchCallback,
     this.onOpenLocation = _noopSearchCallback,
     this.onOpenNotifications = _noopSearchCallback,
-    this.onLogout = _noopSearchCallback,
+    this.onLogout = _noopSearchLogout,
     this.unreadNotificationCount = 0,
     this.shellAvatarUrl,
     this.shellAvatarLabel,
@@ -40,7 +41,7 @@ class SearchScreen extends StatefulWidget {
   final VoidCallback onOpenSearch;
   final VoidCallback onOpenLocation;
   final VoidCallback onOpenNotifications;
-  final VoidCallback onLogout;
+  final Future<void> Function() onLogout;
   final int unreadNotificationCount;
   final String? shellAvatarUrl;
   final String? shellAvatarLabel;
@@ -222,7 +223,7 @@ class _SearchScreenState extends State<SearchScreen>
           onOpenCreatePost: () {},
           onOpenSearch: () {},
           onOpenLocation: () {},
-          onLogout: () {},
+          onLogout: widget.onLogout,
           profileId: profile.id,
           showShellChrome: false,
         ),
@@ -359,7 +360,7 @@ class _SearchScreenState extends State<SearchScreen>
         onOpenLocation: widget.onOpenLocation,
         onOpenNotifications: widget.onOpenNotifications,
         unreadNotificationCount: widget.unreadNotificationCount,
-        onLogout: widget.onLogout,
+        onLogout: () => unawaited(widget.onLogout()),
         headerAvatarUrl: widget.shellAvatarUrl,
         headerAvatarLabel: widget.shellAvatarLabel,
         body: body,

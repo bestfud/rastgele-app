@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_models.dart';
 import '../services/auth_service.dart';
+import '../services/perf_logger.dart';
 import '../services/spot_repository.dart';
 import 'add_spot_screen.dart';
 import 'create_post_screen.dart';
@@ -44,6 +45,7 @@ class _AppShellState extends State<AppShell> {
   Future<void>? _pendingUnreadMessageRefresh;
   Future<void>? _pendingShellBadgeRefresh;
   bool _didScheduleShellInit = false;
+  bool _isSigningOut = false;
 
   @override
   void initState() {
@@ -296,6 +298,53 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  Future<void> _handleLogout() async {
+    if (_isSigningOut) {
+      return;
+    }
+
+    final previousAuthUid = _lastAuthUid ?? widget.authService.currentUser?.id;
+
+    if (mounted) {
+      setState(() {
+        _isSigningOut = true;
+      });
+    }
+
+    try {
+      await widget.authService.signOut();
+      widget.authService.clearSessionState(reason: 'sign_out');
+      widget.repository.clearSessionState(
+        previousAuthUid: previousAuthUid,
+        nextAuthUid: null,
+        reason: 'sign_out',
+      );
+      _lastAuthUid = null;
+      _stopBadgePolling();
+
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+        setState(() {
+          _selectedIndex = 0;
+          _refreshSeed++;
+          _homeSessionSeed++;
+          _shellProfile = null;
+          _unreadNotificationCount = 0;
+          _unreadMessageCount = 0;
+        });
+      }
+    } catch (error) {
+      perfLog('[AUTH] signOut failure error=$error');
+      rethrow;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSigningOut = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<AuthState>(
@@ -341,7 +390,7 @@ class _AppShellState extends State<AppShell> {
               onOpenSearch: _openSearch,
               onOpenLocation: _openLocation,
               onOpenNotifications: _openNotifications,
-              onLogout: widget.authService.signOut,
+              onLogout: _handleLogout,
               unreadNotificationCount: _unreadNotificationCount,
               shellAvatarUrl: _shellProfile?.avatarUrl,
               shellAvatarLabel: _shellProfile?.displayName,
@@ -361,7 +410,7 @@ class _AppShellState extends State<AppShell> {
               onOpenNotifications: _openNotifications,
               unreadMessageCount: _unreadMessageCount,
               unreadNotificationCount: _unreadNotificationCount,
-              onLogout: widget.authService.signOut,
+              onLogout: _handleLogout,
               shellAvatarUrl: _shellProfile?.avatarUrl,
               shellAvatarLabel: _shellProfile?.displayName,
             );
@@ -380,7 +429,7 @@ class _AppShellState extends State<AppShell> {
               onOpenNotifications: _openNotifications,
               unreadMessageCount: _unreadMessageCount,
               unreadNotificationCount: _unreadNotificationCount,
-              onLogout: widget.authService.signOut,
+              onLogout: _handleLogout,
               shellAvatarUrl: _shellProfile?.avatarUrl,
               shellAvatarLabel: _shellProfile?.displayName,
             );
@@ -400,7 +449,7 @@ class _AppShellState extends State<AppShell> {
               onDirectMessageStateChanged: _refreshUnreadMessageCount,
               unreadMessageCount: _unreadMessageCount,
               unreadNotificationCount: _unreadNotificationCount,
-              onLogout: widget.authService.signOut,
+              onLogout: _handleLogout,
               shellAvatarUrl: _shellProfile?.avatarUrl,
               shellAvatarLabel: _shellProfile?.displayName,
             );
@@ -420,6 +469,7 @@ class _AppShellState extends State<AppShell> {
               onOpenLocation: _openLocation,
               onOpenMessages: _openMessages,
               onOpenNotifications: _openNotifications,
+              onLogout: _handleLogout,
               unreadMessageCount: _unreadMessageCount,
               unreadNotificationCount: _unreadNotificationCount,
               shellAvatarUrl: _shellProfile?.avatarUrl,
