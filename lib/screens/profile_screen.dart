@@ -114,11 +114,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadProfile({bool preserveData = false}) async {
     final loadGeneration = ++_loadGeneration;
     final stopwatch = Stopwatch()..start();
+    final cachedSummary = preserveData
+        ? _profileData
+        : widget.repository.cachedProfileSummary(widget.profileId);
     if (!preserveData || _profileData == null) {
       setState(() {
-        _isInitialLoading = true;
+        _isInitialLoading = cachedSummary == null;
         _profileLoadError = null;
-        _profileData = preserveData ? _profileData : null;
+        _profileData = cachedSummary;
         _viewerProfileId = preserveData ? _viewerProfileId : null;
       });
     } else {
@@ -141,8 +144,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileData = phaseOne.data;
         _profileLoadError = null;
         _isInitialLoading = false;
+        _isDeferredSectionLoading = true;
       });
-      _isDeferredSectionLoading = true;
 
       perfLog(
         'Profile phase 1 data load complete in ${_openStopwatch.elapsedMilliseconds}ms posts=${phaseOne.data.posts.length}',
@@ -258,17 +261,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
   ) async {
     try {
       final posts = await widget.repository
-          .fetchPostsByUser(
-            data.profile.postUserId,
+          .fetchProfilePostCards(
+            data.profile.id,
             limit: 10,
-            includeImages: false,
           )
           .timeout(const Duration(seconds: 4), onTimeout: () => const []);
+      final normalizedPosts = posts
+          .map(
+            (post) => post.copyWith(
+              authorProfileId: data.profile.id,
+              displayName: data.profile.displayName,
+              username: data.profile.username,
+              avatarUrl: data.profile.avatarUrl,
+            ),
+          )
+          .toList(growable: false);
       if (!mounted || loadGeneration != _loadGeneration || _profileData == null) {
         return;
       }
       setState(() {
-        _profileData = _profileData!.copyWith(posts: posts);
+        _profileData = _profileData!.copyWith(posts: normalizedPosts);
       });
       await _hydratePostImages(
         _profileData!,

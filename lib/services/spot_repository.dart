@@ -36,10 +36,30 @@ class SpotRepository {
   AppProfile? _cachedCurrentProfile;
   String? _cachedCurrentProfileAuthUid;
   Future<AppProfile>? _pendingCurrentProfileResolution;
+  HomeScreenData? _cachedHomeFeedData;
+  String? _cachedHomeFeedAuthUid;
+  final Map<String, ProfileScreenData> _cachedProfileSummaries = {};
 
   String? get currentAuthUidForDebug => _authService.currentUser?.id;
   String? get currentProfileIdHint => _cachedCurrentProfile?.id;
   Stream<AuthState> get authStateChanges => _authService.authStateChanges;
+  HomeScreenData? getCachedHomeFeedData() {
+    final currentAuthUid = _authService.currentUser?.id;
+    if (_cachedHomeFeedAuthUid != currentAuthUid) {
+      return null;
+    }
+    return _cachedHomeFeedData;
+  }
+
+  ProfileScreenData? cachedProfileSummary(String? profileId) {
+    final key = _profileCacheKey(profileId);
+    return _cachedProfileSummaries[key];
+  }
+
+  String _profileCacheKey(String? profileId) {
+    final normalized = profileId?.trim() ?? '';
+    return normalized.isEmpty ? 'self' : normalized;
+  }
 
   String _normalizeWeatherSpotId(String value) {
     return value.trim().toLowerCase();
@@ -55,6 +75,9 @@ class SpotRepository {
     _cachedCurrentProfile = null;
     _cachedCurrentProfileAuthUid = null;
     _pendingCurrentProfileResolution = null;
+    _cachedHomeFeedData = null;
+    _cachedHomeFeedAuthUid = null;
+    _cachedProfileSummaries.clear();
     perfLog(
       '[auth] repository clearSessionState reason=$reason previousAuthUid=${previousAuthUid ?? 'null'} nextAuthUid=${nextAuthUid ?? 'null'}',
     );
@@ -73,9 +96,58 @@ class SpotRepository {
 
   Future<HomeScreenData> fetchHomeScreenData() async {
     return _runTimed('fetchHomeScreenData', () async {
-      final homeData = await fetchFollowedPublicHomeSpots();
+      final homeData = await fetchHomeFeedCards();
 
       return homeData;
+    });
+  }
+
+  Future<HomeScreenData> fetchHomeFeedCards({
+    int limit = 12,
+  }) async {
+    return _runTimed('fetchHomeFeedCards', () async {
+      try {
+        final profile = _cachedCurrentProfile ??
+            AppProfile(
+              id: currentProfileIdHint ?? '',
+              displayName: 'Balıkçı',
+            );
+        final rows = await _client.rpc(
+          'home_feed_cards',
+          params: {'p_limit': limit},
+        );
+        final rowList = (rows as List)
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList(growable: false);
+        debugPrint('[PERF_ROWS] home_feed_cards rows=${rowList.length}');
+        final items = rowList
+            .map(_homeFeedCardItemFromMap)
+            .where((item) => item.spot.id.isNotEmpty)
+            .toList(growable: false);
+        final data = HomeScreenData(
+          authUid: _authService.currentUser?.id,
+          profile: profile,
+          followedPublicSpots: items,
+          reusedStaleCache: false,
+          repositoryMethod: 'home_feed_cards',
+          followedCount: items.length,
+          ownPublicSpotCount: 0,
+          candidatePostIds: items
+              .map((item) => item.sourcePostId ?? '')
+              .where((id) => id.isNotEmpty)
+              .toList(growable: false),
+          finalResultIds: items
+              .map((item) => item.spot.id)
+              .where((id) => id.isNotEmpty)
+              .toList(growable: false),
+          earlyEmptyReturn: items.isEmpty,
+        );
+        _cachedHomeFeedData = data;
+        _cachedHomeFeedAuthUid = _authService.currentUser?.id;
+        return data;
+      } on PostgrestException {
+        return fetchFollowedPublicHomeSpots(includeSpotEnrichment: false);
+      }
     });
   }
 
@@ -109,9 +181,34 @@ class SpotRepository {
 
   Future<HomeScreenData> fetchHomeScreenPhaseOneData() async {
     return _runTimed('fetchHomeScreenPhaseOneData', () async {
-      return fetchFollowedPublicHomeSpots(
-        includeSpotEnrichment: false,
-      );
+      return fetchHomeFeedCards();
+    });
+  }
+
+  Future<List<SpotFeedItem>> fetchMapSpotCards({
+    int limit = _defaultMapSpotLimit,
+  }) async {
+    return _runTimed('fetchMapSpotCards', () async {
+      try {
+        final rows = await _client.rpc(
+          'map_spot_cards',
+          params: {'p_limit': limit},
+        );
+        final rowList = (rows as List)
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList(growable: false);
+        debugPrint('[PERF_ROWS] map_spot_cards rows=${rowList.length}');
+        return rowList
+            .map(_mapSpotCardItemFromMap)
+            .where((item) => item.spot.id.isNotEmpty)
+            .toList(growable: false);
+      } on PostgrestException {
+        return fetchGlobalVisibleSpots(
+          includeScores: false,
+          includeWeather: false,
+          limit: limit,
+        );
+      }
     });
   }
 
@@ -739,22 +836,71 @@ class SpotRepository {
     bool includePostImages = true,
   }) async {
     return _runTimed('fetchProfileScreenPhaseOneData', () async {
-      final normalizedProfileId = profileId?.trim();
-      final isSelfProfileLookup =
-          normalizedProfileId == null || normalizedProfileId.isEmpty;
-      final currentProfile = isSelfProfileLookup
-          ? await _resolveCanonicalCurrentProfile(
-              scope: 'fetchProfileScreenPhaseOneData.self',
-            )
-          : null;
-      final summary = await _fetchProfileSummary(
-        isSelfProfileLookup ? currentProfile!.id : normalizedProfileId,
-      );
-      final profile = currentProfile ?? summary.profile;
-
+      final summaryData = await fetchProfileSummaryCard(profileId: profileId);
       return ProfileScreenPhaseOneData(
-        data: ProfileScreenData(
+        data: summaryData,
+        postIds: const [],
+      );
+    });
+  }
+
+  Future<ProfileScreenData> fetchProfileSummaryCard({
+    String? profileId,
+  }) async {
+    return _runTimed('fetchProfileSummaryCard', () async {
+      final normalizedProfileId = profileId?.trim();
+      final cacheKey = _profileCacheKey(normalizedProfileId);
+      try {
+        final rows = await _client.rpc(
+          'profile_summary',
+          params: {
+            'p_profile_id': normalizedProfileId?.isEmpty ?? true
+                ? null
+                : normalizedProfileId,
+          },
+        );
+        final rowList = rows as List;
+        if (rowList.isEmpty) {
+          throw Exception('Profil bulunamadı.');
+        }
+        final row = Map<String, dynamic>.from(rowList.first as Map);
+        debugPrint('[PERF_ROWS] profile_summary rows=${rowList.length}');
+        final profile = AppProfile.fromMap({
+          'id': row['profile_id'],
+          'display_name': row['display_name'],
+          'username': row['username'],
+          'avatar_url': row['avatar_url'],
+          'cover_url': row['cover_url'],
+          'bio': row['bio'],
+          'city': row['city'],
+          'home_region': row['home_region'],
+          'website_url': row['website_url'],
+          'instagram': row['instagram'],
+          'x_handle': row['x_handle'],
+          'youtube': row['youtube'],
+          'tiktok': row['tiktok'],
+        });
+        final data = ProfileScreenData(
           profile: profile,
+          stats: ProfileStats(
+            totalPosts: _asInt(row['post_count']),
+            totalFishingSpots: _asInt(row['spot_count']),
+            followerCount: _asInt(row['follower_count']),
+            followingCount: _asInt(row['following_count']),
+          ),
+          posts: const [],
+          publicSpots: const [],
+          savedSpots: const [],
+          sharedWithMeSpots: const [],
+          isOwnProfile: row['is_own'] == true,
+          isFollowing: row['is_following'] == true,
+        );
+        _cachedProfileSummaries[cacheKey] = data;
+        return data;
+      } on PostgrestException {
+        final summary = await _fetchProfileSummary(profileId);
+        final data = ProfileScreenData(
+          profile: summary.profile,
           stats: ProfileStats(
             totalPosts: summary.totalPosts,
             totalFishingSpots: summary.totalFishingSpots,
@@ -765,11 +911,52 @@ class SpotRepository {
           publicSpots: const [],
           savedSpots: const [],
           sharedWithMeSpots: const [],
-          isOwnProfile: isSelfProfileLookup || summary.isOwnProfile,
-          isFollowing: isSelfProfileLookup ? false : summary.isFollowing,
-        ),
-        postIds: const [],
-      );
+          isOwnProfile: summary.isOwnProfile,
+          isFollowing: summary.isFollowing,
+        );
+        _cachedProfileSummaries[cacheKey] = data;
+        return data;
+      }
+    });
+  }
+
+  Future<List<SocialPost>> fetchProfilePostCards(
+    String profileId, {
+    int limit = 10,
+    int offset = 0,
+  }) async {
+    return _runTimed('fetchProfilePostCards', () async {
+      final normalizedProfileId = profileId.trim();
+      if (normalizedProfileId.isEmpty) {
+        return const <SocialPost>[];
+      }
+
+      try {
+        final rows = await _client.rpc(
+          'profile_post_cards',
+          params: {
+            'p_profile_id': normalizedProfileId,
+            'p_limit': limit,
+            'p_offset': offset,
+          },
+        );
+        final rowList = (rows as List)
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList(growable: false);
+        debugPrint('[PERF_ROWS] profile_post_cards rows=${rowList.length}');
+        return rowList
+            .map(_profilePostCardFromMap)
+            .where((post) => post.id.isNotEmpty)
+            .toList(growable: false);
+      } on PostgrestException {
+        final summary = await fetchProfileSummaryCard(profileId: normalizedProfileId);
+        return fetchPostsByUser(
+          summary.profile.postUserId,
+          limit: limit,
+          offset: offset,
+          includeImages: false,
+        );
+      }
     });
   }
 
@@ -2808,6 +2995,16 @@ class SpotRepository {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
+  double _asDouble(dynamic value) {
+    if (value is double) {
+      return value;
+    }
+    if (value is num) {
+      return value.toDouble();
+    }
+    return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
   List<String> _asStringList(dynamic value) {
     return _asList(value)
         .map((item) => item?.toString().trim() ?? '')
@@ -2875,6 +3072,85 @@ class SpotRepository {
         );
       },
     ).toList(growable: false);
+  }
+
+  SpotFeedItem _homeFeedCardItemFromMap(Map<String, dynamic> map) {
+    final spotId = _firstNonEmptyString(map, const ['spot_id']) ?? '';
+    final authorId = _firstNonEmptyString(map, const ['author_id']);
+    final createdAt = _firstParsedDateTime(map, const ['created_at']);
+    final scoreSummary = _firstNonEmptyString(map, const ['score_summary']);
+
+    return SpotFeedItem(
+      spot: FishingSpot(
+        id: spotId,
+        ownerProfileId: authorId ?? '',
+        name: _firstNonEmptyString(map, const ['spot_name']) ?? 'Adsız mera',
+        latitude: _asDouble(map['spot_lat']),
+        longitude: _asDouble(map['spot_lng']),
+        visibility: 'exact',
+        status: 'active',
+        createdAt: createdAt,
+      ),
+      score: _feedCardScore(spotId, scoreSummary),
+      sharedByProfileId: authorId,
+      sharedByDisplayName: _firstNonEmptyString(map, const ['author_name']),
+      sharedByAvatarUrl: _firstNonEmptyString(
+        map,
+        const ['author_avatar_url'],
+      ),
+      sourcePostId: _firstNonEmptyString(map, const ['post_id']),
+      sourceUserId: authorId,
+      sharedAt: createdAt,
+    );
+  }
+
+  SpotFeedItem _mapSpotCardItemFromMap(Map<String, dynamic> map) {
+    final spotId = _firstNonEmptyString(map, const ['spot_id']) ?? '';
+    final rawScoreValue = map['score_value'];
+    final scoreValue = rawScoreValue == null ? null : _asInt(rawScoreValue);
+    return SpotFeedItem(
+      spot: FishingSpot(
+        id: spotId,
+        ownerProfileId: '',
+        name: _firstNonEmptyString(map, const ['name']) ?? 'Adsız mera',
+        latitude: _asDouble(map['latitude']),
+        longitude: _asDouble(map['longitude']),
+        visibility: 'exact',
+        status: 'active',
+        waterType: _firstNonEmptyString(map, const ['water_type']),
+      ),
+      score: scoreValue == null
+          ? null
+          : FishingScore(
+              id: 'map:$spotId',
+              fishingSpotId: spotId,
+              scoreValue: scoreValue,
+              scoreLabel: scoreValue >= 70 ? 'İyi' : 'Orta',
+              scoreSummary: 'Skor $scoreValue',
+              scoreTime: DateTime.now(),
+            ),
+    );
+  }
+
+  SocialPost _profilePostCardFromMap(Map<String, dynamic> map) {
+    final thumbnail = _firstNonEmptyString(map, const ['thumbnail_url']);
+    final imageUrl = _looksLikeRemoteUrl(thumbnail) ? thumbnail : null;
+    final imageStoragePath = imageUrl == null ? thumbnail : null;
+
+    return SocialPost.fromMap({
+      'id': map['post_id'],
+      'user_id': map['profile_id'],
+      'author_profile_id': map['profile_id'],
+      'caption': map['caption'],
+      'created_at': map['created_at'],
+      'image_url': imageUrl,
+      'image_storage_path': imageStoragePath,
+      'fishing_spot_id': map['fishing_spot_id'],
+      'linked_fishing_spot_id': map['fishing_spot_id'],
+      'region': map['region'],
+      'latitude': map['latitude'],
+      'longitude': map['longitude'],
+    });
   }
 
   SpotFeedItem _spotFeedItemFromMap(Map<String, dynamic> map) {
@@ -2954,6 +3230,35 @@ class SpotRepository {
       }
     }
     return null;
+  }
+
+  FishingScore? _feedCardScore(String spotId, String? scoreSummary) {
+    final raw = scoreSummary?.trim();
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+
+    final leadingNumber = RegExp(r'^(\d+)').firstMatch(raw);
+    final scoreValue = leadingNumber == null
+        ? null
+        : int.tryParse(leadingNumber.group(1) ?? '');
+    if (scoreValue == null) {
+      return null;
+    }
+
+    return FishingScore(
+      id: 'feed:$spotId',
+      fishingSpotId: spotId,
+      scoreValue: scoreValue,
+      scoreLabel: scoreValue >= 70 ? 'İyi' : 'Orta',
+      scoreSummary: raw,
+      scoreTime: DateTime.now(),
+    );
+  }
+
+  bool _looksLikeRemoteUrl(String? value) {
+    final normalized = value?.trim() ?? '';
+    return normalized.startsWith('http://') || normalized.startsWith('https://');
   }
 
   Future<Map<String, _WeatherSnapshotPair>> _fetchLatestWeatherSnapshotPairs(

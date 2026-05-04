@@ -109,17 +109,19 @@ class _HomeScreenState extends State<HomeScreen>
     bool preserveData = false,
   }) async {
     final generation = ++_loadGeneration;
+    final cachedHomeData =
+        preserveData ? _homeData : widget.repository.getCachedHomeFeedData();
     if (mounted) {
       setState(() {
-        _isFeedLoading = true;
+        _isFeedLoading = cachedHomeData == null;
         _isDeferredLoading = false;
         _loadError = null;
-        _homeData = preserveData ? _homeData : null;
+        _homeData = cachedHomeData;
       });
     }
 
     try {
-      final homeData = await widget.repository.fetchHomeScreenPhaseOneData();
+      final homeData = await widget.repository.fetchHomeFeedCards();
       final currentAuthUid = widget.authService.currentUser?.id;
       final isStaleGeneration = generation != _loadGeneration;
       final isStaleAuth = homeData.authUid != currentAuthUid;

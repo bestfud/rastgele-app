@@ -332,11 +332,7 @@ class _MapScreenState extends State<MapScreen>
         return _spotItems ?? const <SpotFeedItem>[];
       case _MapLayerFilter.spots:
       case _MapLayerFilter.all:
-        return widget.repository.fetchGlobalVisibleSpots(
-          includeScores: false,
-          includeWeather: false,
-          limit: 32,
-        );
+        return widget.repository.fetchMapSpotCards(limit: 32);
     }
   }
 
