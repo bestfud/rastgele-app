@@ -66,22 +66,25 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isFeedLoading = true;
   bool _isDeferredLoading = false;
   BrowserCoordinates? _userCoordinates;
-  bool _didLogTotalDataLoaded = false;
   int _loadGeneration = 0;
   List<SpotFeedItem> _savedItems = const [];
   List<SpotFeedItem> _sharedItems = const [];
   bool _isSupplementalLoading = false;
+  bool _didRequestSavedItems = false;
+  bool _didRequestSharedItems = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _tabController.addListener(_handleTabSelectionChanged);
     _loadHome(reason: 'init');
     _loadUserCoordinates();
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_handleTabSelectionChanged);
     _tabController.dispose();
     super.dispose();
   }
@@ -134,15 +137,18 @@ class _HomeScreenState extends State<HomeScreen>
         if (!preserveData) {
           _savedItems = const [];
           _sharedItems = const [];
+          _didRequestSavedItems = false;
+          _didRequestSharedItems = false;
         }
         _isFeedLoading = false;
-        _isDeferredLoading = homeData.followedPublicSpots.isNotEmpty;
-        _isSupplementalLoading = true;
+        _isDeferredLoading = false;
+        _isSupplementalLoading = false;
       });
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(_loadDeferredHomeEnrichment(homeData, generation));
-        unawaited(_loadSupplementalHomeFeeds(generation));
+        debugPrint('enrich skipped reason=lightweight_home');
+        debugPrint('shared load skipped reason=not_visible');
+        _maybeLoadVisibleSupplemental(generation);
       });
     } catch (error) {
       if (!mounted || generation != _loadGeneration) {
@@ -159,76 +165,82 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  Future<void> _loadDeferredHomeEnrichment(
-    HomeScreenData homeData,
-    int generation,
-  ) async {
+  void _handleTabSelectionChanged() {
+    if (_tabController.indexIsChanging) {
+      return;
+    }
+    _maybeLoadVisibleSupplemental(_loadGeneration);
+  }
+
+  void _maybeLoadVisibleSupplemental(int generation) {
+    final filter = _selectedFilter;
+    if (filter == _HomeSpotFilter.shared && !_didRequestSharedItems) {
+      unawaited(_loadSharedItemsIfNeeded(generation));
+    }
+    if (filter == _HomeSpotFilter.saved && !_didRequestSavedItems) {
+      unawaited(_loadSavedItemsIfNeeded(generation));
+    }
+  }
+
+  Future<void> _loadSavedItemsIfNeeded(int generation) async {
+    if (_didRequestSavedItems) {
+      return;
+    }
+    _didRequestSavedItems = true;
+    if (mounted) {
+      setState(() {
+        _isSupplementalLoading = true;
+      });
+    }
     final stopwatch = Stopwatch()..start();
     try {
-      final enrichedItems = await widget.repository.enrichSpotFeedItems(
-        homeData.followedPublicSpots.take(5).toList(growable: false),
-        includeScores: true,
-        includeWeather: true,
-      );
+      final savedItems = await widget.repository
+          .fetchFavoriteSpots()
+          .timeout(const Duration(seconds: 4), onTimeout: () => const []);
       stopwatch.stop();
       if (!mounted || generation != _loadGeneration) {
         return;
       }
-
-      final currentAuthUid = widget.authService.currentUser?.id;
-      final isStaleAuth = homeData.authUid != currentAuthUid;
-      if (isStaleAuth) {
-        return;
-      }
-
       setState(() {
-        final currentItems = _homeData?.followedPublicSpots ?? const [];
-        final enrichedById = {
-          for (final item in enrichedItems) item.spot.id: item,
-        };
-        final mergedItems = currentItems
-            .map((item) => enrichedById[item.spot.id] ?? item)
-            .toList(growable: false);
-        _homeData = _homeData?.copyWith(
-          followedPublicSpots: mergedItems,
-          repositoryMethod: 'fetchFollowedPublicHomeSpots',
-        );
+        _savedItems = savedItems;
         _isDeferredLoading = false;
+        _isSupplementalLoading = false;
       });
-      if (!_didLogTotalDataLoaded) {
-        _didLogTotalDataLoaded = true;
-      }
-    } catch (error) {
+    } catch (_) {
+      _didRequestSavedItems = false;
       stopwatch.stop();
       if (!mounted || generation != _loadGeneration) {
         return;
       }
-
       setState(() {
-        _isDeferredLoading = false;
+        _isSupplementalLoading = false;
       });
     }
   }
 
-  Future<void> _loadSupplementalHomeFeeds(int generation) async {
+  Future<void> _loadSharedItemsIfNeeded(int generation) async {
+    if (_didRequestSharedItems) {
+      return;
+    }
+    _didRequestSharedItems = true;
+    if (mounted) {
+      setState(() {
+        _isSupplementalLoading = true;
+      });
+    }
     try {
-      final results = await Future.wait<dynamic>([
-        widget.repository
-            .fetchFavoriteSpots()
-            .timeout(const Duration(seconds: 4), onTimeout: () => const []),
-        widget.repository
-            .fetchSharedWithMeSpots()
-            .timeout(const Duration(seconds: 4), onTimeout: () => const []),
-      ]);
+      final sharedItems = await widget.repository
+          .fetchSharedWithMeSpots()
+          .timeout(const Duration(seconds: 4), onTimeout: () => const []);
       if (!mounted || generation != _loadGeneration) {
         return;
       }
       setState(() {
-        _savedItems = results[0] as List<SpotFeedItem>;
-        _sharedItems = results[1] as List<SpotFeedItem>;
+        _sharedItems = sharedItems;
         _isSupplementalLoading = false;
       });
     } catch (_) {
+      _didRequestSharedItems = false;
       if (!mounted || generation != _loadGeneration) {
         return;
       }

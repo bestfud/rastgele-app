@@ -137,7 +137,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _scheduleDeferredShellBadgeRefresh() async {
-    await Future<void>.delayed(const Duration(milliseconds: 600));
+    await Future<void>.delayed(const Duration(seconds: 7));
     if (!mounted) {
       return;
     }

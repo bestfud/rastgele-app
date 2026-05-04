@@ -103,9 +103,11 @@ class SpotRepository {
   }
 
   Future<HomeScreenData> fetchHomeFeedCards({
-    int limit = 12,
+    int limit = 10,
   }) async {
     return _runTimed('fetchHomeFeedCards', () async {
+      final stopwatch = Stopwatch()..start();
+      var rowCount = 0;
       try {
         final profile = _cachedCurrentProfile ??
             AppProfile(
@@ -119,7 +121,7 @@ class SpotRepository {
         final rowList = (rows as List)
             .map((item) => Map<String, dynamic>.from(item as Map))
             .toList(growable: false);
-        debugPrint('[PERF_ROWS] home_feed_cards rows=${rowList.length}');
+        rowCount = rowList.length;
         final items = rowList
             .map(_homeFeedCardItemFromMap)
             .where((item) => item.spot.id.isNotEmpty)
@@ -147,6 +149,11 @@ class SpotRepository {
         return data;
       } on PostgrestException {
         return fetchFollowedPublicHomeSpots(includeSpotEnrichment: false);
+      } finally {
+        stopwatch.stop();
+        debugPrint(
+          '[PERF_ROWS] home_feed_cards duration=${stopwatch.elapsedMilliseconds}ms rows=$rowCount',
+        );
       }
     });
   }
