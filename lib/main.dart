@@ -10,6 +10,7 @@ import 'screens/onboarding_screen.dart';
 import 'services/auth_service.dart';
 import 'services/spot_repository.dart';
 import 'services/supabase_config.dart';
+import 'widgets/app_logo.dart';
 import 'widgets/app_ui.dart';
 
 Future<void> main() async {
@@ -96,7 +97,7 @@ class FishingApp extends StatelessWidget {
     );
 
     return MaterialApp(
-      title: 'Balık Uygulaması',
+      title: 'Rastgele',
       debugShowCheckedModeBanner: false,
       locale: const Locale('tr'),
       supportedLocales: const [
@@ -306,11 +307,7 @@ class _OnboardingGateState extends State<OnboardingGate> {
   Widget build(BuildContext context) {
     final isCompleted = _isCompleted;
     if (isCompleted == null) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+      return const _AppSplashScreen();
     }
 
     if (!isCompleted) {
@@ -320,6 +317,47 @@ class _OnboardingGateState extends State<OnboardingGate> {
     }
 
     return widget.child;
+  }
+}
+
+class _AppSplashScreen extends StatelessWidget {
+  const _AppSplashScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFFF8FBFF),
+              Colors.white,
+            ],
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const AppLogo(height: 132),
+              const SizedBox(height: 28),
+              SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -339,7 +377,7 @@ class MissingConfigApp extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       home: Scaffold(
-        appBar: AppBar(title: const Text('Balık Uygulaması')),
+        appBar: AppBar(title: const Text('Rastgele')),
         body: const Padding(
           padding: EdgeInsets.all(24),
           child: Center(

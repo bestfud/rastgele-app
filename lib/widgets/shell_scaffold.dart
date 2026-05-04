@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'app_icons.dart';
+import 'app_logo.dart';
 import 'app_ui.dart';
 
 void _noopCallback() {}
@@ -71,21 +71,8 @@ class ShellScaffold extends StatelessWidget {
         ),
         centerTitle: true,
         title: const SizedBox(
-          width: 28,
           height: 28,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: AppColors.primarySoft,
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: AppIcon(
-                AppGlyph.fish,
-                size: 14,
-                color: AppColors.primary,
-              ),
-            ),
-          ),
+          child: AppLogo(height: 28),
         ),
         actions: [
           Padding(

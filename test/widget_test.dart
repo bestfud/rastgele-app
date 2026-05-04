@@ -6,7 +6,7 @@ void main() {
   testWidgets('missing config app renders guidance', (WidgetTester tester) async {
     await tester.pumpWidget(const MissingConfigApp());
 
-    expect(find.text('Balık Uygulaması'), findsOneWidget);
+    expect(find.text('Rastgele'), findsOneWidget);
     expect(find.textContaining('SUPABASE_URL'), findsOneWidget);
   });
 }
